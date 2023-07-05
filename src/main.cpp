@@ -39,8 +39,10 @@ class MyServerCallbacks : public BLEServerCallbacks
   {
     BLEAddress remoteAddress(param->connect.remote_bda);
     std::string remoteAddressStr = remoteAddress.toString();
+    Serial.println("/****************************/");
     Serial.print("Connected to device with address: ");
     Serial.println(remoteAddressStr.c_str());  
+    Serial.println("/****************************/");
   }
 };
 
@@ -62,7 +64,8 @@ int16_t encryptAndSend(byte msg[], uint16_t msgLen, byte iv[]) {
   return enc_bytes;
 }
 
-int16_t decrypt(byte msg[], uint16_t msgLen, byte iv[]) {
+int16_t decryptAndPrint(byte msg[], uint16_t msgLen, byte iv[]) 
+{
   Serial.print("Calling decrypt... "); Serial.print(msgLen); Serial.println(" Bytes");
   uint16_t dec_bytes = aesLib.decrypt(msg, msgLen, (byte*)deBuffer, aes_key, sizeof(aes_key), iv);
   Serial.print("Decrypted bytes: "); Serial.println(dec_bytes);
@@ -74,7 +77,7 @@ void setup() {
   Serial.setTimeout(60000);
 
   // Create the BLE Device
-  BLEDevice::init("ESP32");
+  BLEDevice::init("ESP32-server");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
@@ -83,7 +86,6 @@ void setup() {
   pCharacteristic_1 = pService->createCharacteristic(
       CHARACTERISTIC_UUID_1,
       BLECharacteristic::PROPERTY_READ |
-      BLECharacteristic::PROPERTY_WRITE |
       BLECharacteristic::PROPERTY_NOTIFY |
       BLECharacteristic::PROPERTY_INDICATE);
   pCharacteristic_2 = pService->createCharacteristic(
@@ -112,22 +114,14 @@ void setup() {
   delay(2000);
 }
 
-int padding = 0;
-
 void loop() {
   if (deviceConnected)
   {
- Serial.print("Current padding mode: "); Serial.println(padding);
-  aesLib.set_paddingmode((paddingMode)padding); // <-- added
-  padding++; if (padding > 6) padding = 0;
-
   // reset initialization vector
   memcpy(dec_iv, aes_iv, sizeof(aes_iv));
   /***********send and encrypt data***********/
-  unsigned char msgToSend[] = { "7mada" };
-  size_t msgToSend_size = sizeof(msgToSend); // sizeof(data);
-  Serial.print("Encrypting data of size "); Serial.println(msgToSend_size);
-  int16_t encLen = encryptAndSend(msgToSend, msgToSend_size, dec_iv);  
+  unsigned char msgToSend[] = { "7madaaaaaaaaaaa" };
+  int16_t encLen = encryptAndSend(msgToSend, sizeof(msgToSend), dec_iv);  
   Serial.print("Encrypted ciphertext of length: "); Serial.println(encLen);
   Serial.print("Encrypted ciphertext:\n"); Serial.println((char*)enBuffer);
 
@@ -140,7 +134,7 @@ void loop() {
       int receivedLength = receivedValue.length();
       byte receivedMsg[receivedLength];
       memcpy(receivedMsg, receivedValue.c_str(), receivedLength);
-      int16_t decLen = decrypt(receivedMsg, receivedLength , dec_iv);   
+      int16_t decLen = decryptAndPrint(receivedMsg, receivedLength , dec_iv);   
       Serial.print("Decrypted cleartext of length: "); Serial.println(decLen);
       Serial.print("Decrypted cleartext:\n"); Serial.println((char*)deBuffer);
     }
@@ -161,5 +155,3 @@ void loop() {
     oldDeviceConnected = deviceConnected;
   }
 }
-  
-
