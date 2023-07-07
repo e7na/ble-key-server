@@ -55,10 +55,8 @@ class MyServerCallbacks : public BLEServerCallbacks
   {
     BLEAddress remoteAddress(param->connect.remote_bda);
     std::string remoteAddressStr = remoteAddress.toString();
-    Serial.println("/****************************/");
     Serial.print("Connected to device with address: ");
     Serial.println(remoteAddressStr.c_str());  
-    Serial.println("/****************************/");
   }
 };
 
@@ -67,28 +65,29 @@ AESLib aes;
 #define INPUT_BUFFER_LIMIT (16 + 1) // TEST + \0
 uint8_t enBuffer[INPUT_BUFFER_LIMIT] = {0};
 uint8_t deBuffer[INPUT_BUFFER_LIMIT] = {0};
-byte dec_iv[N_BLOCK]        = {0};
+byte dec_iv[16]        = {0};
 
-static byte aes_key[]       = { 0xdf, 0x4f, 0x66, 0x80, 0x9b, 0xaf, 0xe5, 0x8f, 0xe1, 0x6a, 0xba, 0x7f, 0x4c, 0xb3, 0xe8, 0xbc };
-static byte aes_iv[N_BLOCK] = { 0x3b, 0x69, 0x88, 0x60, 0x53, 0x84, 0x01, 0xcd, 0xd1, 0x46, 0x50, 0x42, 0x78, 0xae, 0xec, 0xc9 };
+static byte aesKey[16] = { 0 };
+static byte aesIv[16]  = { 0 };
 
-int16_t encryptAndSend(byte msg[], uint16_t msgLen, byte iv[]) {
+int16_t encryptAndSend(byte msg[], uint16_t msgLen, byte iv[]) 
+{
   Serial.print("Calling encrypt... "); Serial.print(msgLen); Serial.println(" Bytes");
-  uint16_t enc_bytes = aes.encrypt(msg, msgLen, (byte*)enBuffer, aes_key, sizeof(aes_key), iv);
+  uint16_t enc_bytes = aes.encrypt(msg, msgLen, (byte*)enBuffer, aesKey, sizeof(aesKey), iv);
   pCharacteristic_1->setValue(enBuffer, msgLen);
   pCharacteristic_1->notify();
   return enc_bytes;
 }
-
 int16_t decryptAndPrint(byte msg[], uint16_t msgLen, byte iv[]) 
 {
   Serial.print("Calling decrypt... "); Serial.print(msgLen); Serial.println(" Bytes");
-  uint16_t dec_bytes = aes.decrypt(msg, msgLen, (byte*)deBuffer, aes_key, sizeof(aes_key), iv);
+  uint16_t dec_bytes = aes.decrypt(msg, msgLen, (byte*)deBuffer, aesKey, sizeof(aesKey), iv);
   Serial.print("Decrypted bytes: "); Serial.println(dec_bytes);
   return dec_bytes;
 }
 
-void setup() {
+void setup() 
+{
   Serial.begin(BAUD);
   Serial.setTimeout(60000);
 
@@ -156,9 +155,8 @@ void setup() {
   pBLE2902_6->setNotifications(true);
   pCharacteristic_6->addDescriptor(pBLE2902_6);
 
-  pService->start();
-
   // Start advertising
+  pService->start();
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(false);
@@ -173,12 +171,49 @@ void loop() {
   {
     if (BUTTON_PRESSED)
     {
+      // Button is pressed, receive new AES key and vector
+      byte newKey[sizeof(aesKey)];
+      byte newVector[16];
+      // Receive new AES key via pCharacteristic_2
+      std::string receivedKey    = pCharacteristic_2->getValue();
+      if (!receivedKey.empty())    memcpy(newKey, receivedKey.c_str(), sizeof(aesKey));
+      // Receive new vector via pCharacteristic_3
+      std::string receivedVector = pCharacteristic_3->getValue();
+      if (!receivedVector.empty()) memcpy(newVector, receivedVector.c_str(), 16);
+      // Save new key and vector to EEPROM
+      EEPROM.begin(sizeof(newKey) + sizeof(newVector));
+      for (int i = 0; i < sizeof(newKey); i++) 
+      {
+        EEPROM.write(i, newKey[i]);
+      }
+      for (int i = 0; i < sizeof(newVector); i++) 
+      {
+        EEPROM.write(sizeof(newKey) + i, newVector[i]);
+      }
+      EEPROM.commit();
+      EEPROM.end();
     }
-    else
+    else 
     {
+      // Button is not pressed, read key and vector from EEPROM
+      byte savedKey[sizeof(aesKey)];
+      byte savedVector[16];
+
+      EEPROM.begin(sizeof(aesKey) + sizeof(aesIv));
+      for (int i = 0; i < sizeof(aesKey); i++) 
+      {
+        savedKey[i] = EEPROM.read(i);
+      }
+      for (int i = 0; i < sizeof(savedVector); i++) 
+      {
+        savedVector[i] = EEPROM.read(sizeof(aesKey) + i);
+      }
+      EEPROM.end();
+
+      // Use the saved key and vector for encryption/decryption
+      memcpy(aesKey, savedKey,   sizeof(aesKey));
+      memcpy(aesIv,  savedVector,sizeof(aesIv));
     }
-    
-    
   }
   if (!deviceConnected && oldDeviceConnected)
   {
