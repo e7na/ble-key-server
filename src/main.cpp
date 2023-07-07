@@ -61,31 +61,10 @@ class MyServerCallbacks : public BLEServerCallbacks
   }
 };
 
-
 AESLib aes;
-#define INPUT_BUFFER_LIMIT (16 + 1) // TEST + \0
-uint8_t enBuffer[INPUT_BUFFER_LIMIT] = {0};
-uint8_t deBuffer[INPUT_BUFFER_LIMIT] = {0};
-byte dec_iv[16]        = {0};
 
 static byte aesKey[16] = { 0 };
 static byte aesIv[16]  = { 0 };
-
-int16_t encryptAndSend(byte msg[], uint16_t msgLen, byte iv[]) 
-{
-  Serial.print("Calling encrypt... "); Serial.print(msgLen); Serial.println(" Bytes");
-  uint16_t enc_bytes = aes.encrypt(msg, msgLen, (byte*)enBuffer, aesKey, sizeof(aesKey), iv);
-  pCharacteristic_1->setValue(enBuffer, msgLen);
-  pCharacteristic_1->notify();
-  return enc_bytes;
-}
-int16_t decryptAndPrint(byte msg[], uint16_t msgLen, byte iv[]) 
-{
-  Serial.print("Calling decrypt... "); Serial.print(msgLen); Serial.println(" Bytes");
-  uint16_t dec_bytes = aes.decrypt(msg, msgLen, (byte*)deBuffer, aesKey, sizeof(aesKey), iv);
-  Serial.print("Decrypted bytes: "); Serial.println(dec_bytes);
-  return dec_bytes;
-}
 
 void setup() 
 {
