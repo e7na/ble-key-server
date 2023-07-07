@@ -11,6 +11,7 @@
 #include <EEPROM.h>
 
 #define BAUD 115200
+
 #define BUTTON_PIN 2
 #define BUTTON_PRESSED (digitalRead(BUTTON_PIN) == HIGH)
 
@@ -213,6 +214,33 @@ void loop() {
       // Use the saved key and vector for encryption/decryption
       memcpy(aesKey, savedKey,   sizeof(aesKey));
       memcpy(aesIv,  savedVector,sizeof(aesIv));
+    }
+
+    // Generate a random message
+    byte randomMessage[16];  
+    for (int i = 0; i < sizeof(randomMessage); i++) 
+    {
+      randomMessage[i] = random(256);  // Generate a random byte (0-255)
+    }
+
+    // Send the random message through pCharacteristic_4
+    std::string randomStr(reinterpret_cast<const char*>(randomMessage), sizeof(randomMessage));
+    pCharacteristic_4->setValue(randomStr);
+    pCharacteristic_4->notify();
+
+    // Wait to receive a message through pCharacteristic_5
+    std::string enReceived = pCharacteristic_5->getValue();
+    if (!enReceived.empty()) 
+    {
+      // Encrypt the generated random message for comparison
+      byte encryptedRandomMessage[16];
+      uint16_t enc_bytes = aes.encrypt(randomMessage, sizeof(randomMessage), encryptedRandomMessage, aesKey, sizeof(aesKey), aesIv);
+
+      // Convert the encrypted random message to a string for comparison
+      std::string encryptedStr(reinterpret_cast<const char*>(encryptedRandomMessage), enc_bytes);
+
+      // Compare the received message with the encrypted random message
+      bool isAuthorized = (enReceived == encryptedStr);
     }
   }
   if (!deviceConnected && oldDeviceConnected)
