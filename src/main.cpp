@@ -12,8 +12,15 @@
 
 #define BAUD 115200
 
-#define BUTTON_PIN 2
+#define BUTTON_PIN  4
+#define LOCK_PIN    2
+
 #define BUTTON_PRESSED (digitalRead(BUTTON_PIN) == HIGH)
+
+bool isAuthorized = false;
+
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pCharacteristic_1 = NULL;
@@ -37,14 +44,12 @@ BLE2902 *pBLE2902_6;
 #define CHARACTERISTIC_UUID_5 "acc9a30f-9e44-4323-8193-7bac8c9bc484"
 #define CHARACTERISTIC_UUID_6 "9800d290-19fb-4085-9610-f1e878725ad2"
 
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-
 class MyServerCallbacks : public BLEServerCallbacks
 {
   void onConnect(BLEServer *pServer)
   {
     deviceConnected = true;
+    isAuthorized = false;
     Serial.println("Connected to client");
   };
   void onDisconnect(BLEServer *pServer)
@@ -72,6 +77,7 @@ void setup()
   Serial.setTimeout(60000);
 
   pinMode(BUTTON_PIN, INPUT);      /*when pressed should let us save new key and vector in memory*/
+  pinMode(LOCK_PIN  , OUTPUT); 
 
   // Create the BLE Device
   BLEDevice::init("ESP32");
@@ -221,9 +227,24 @@ void loop() {
       // Compare the received message with the encrypted random message
       bool isAuthorized = (enReceived == encryptedStr);
     }
+    // Update pCharacteristic_1 with the authorization status
+    std::string authStatus = isAuthorized ? "Authorized" : "Unauthorized";
+    pCharacteristic_1->setValue(authStatus);
+    pCharacteristic_1->notify();
+    // Control the hardware lock based on the received message
+    std::string controlMessage = pCharacteristic_6->getValue();
+    if (!controlMessage.empty() && isAuthorized) 
+    {
+      if (controlMessage == "ON") {
+        digitalWrite(LOCK_PIN,HIGH);
+      } else if (controlMessage == "OFF") {
+        digitalWrite(LOCK_PIN,LOW);
+      }
+    }
   }
   if (!deviceConnected && oldDeviceConnected)
   {
+    isAuthorized = false ;
     delay(500);                  // give the bluetooth stack the chance to get things ready
     pServer->startAdvertising(); // restart advertising
     //Serial.println("start advertising");
