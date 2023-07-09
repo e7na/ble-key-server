@@ -62,7 +62,7 @@ class MyServerCallbacks : public BLEServerCallbacks
     BLEAddress remoteAddress(param->connect.remote_bda);
     std::string remoteAddressStr = remoteAddress.toString();
     Serial.print("Connected to device with address: ");
-    Serial.println(remoteAddressStr.c_str());  
+    Serial.println(remoteAddressStr.c_str());
   }
 };
 
@@ -71,7 +71,7 @@ AESLib aes;
 static byte aesKey[16] = { 0 };
 static byte aesIv[16]  = { 0 };
 
-bool buttonStateChanged = false; 
+bool buttonStateChanged = false;
 
 void IRAM_ATTR handleButtonPress()
 {
@@ -82,7 +82,7 @@ void IRAM_ATTR handleButtonPress()
   }
 }
 
-void setup() 
+void setup()
 {
   Serial.begin(BAUD);
   Serial.setTimeout(60000);
@@ -97,7 +97,7 @@ void setup()
   BLEDevice::init("ESP32");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID), 20, 0);
 
 
   // Create a BLE Characteristic
@@ -194,11 +194,11 @@ void loop() {
       if (!receivedVector.empty()) memcpy(newVector, receivedVector.c_str(), 16);
       // Save new key and vector to EEPROM
       EEPROM.begin(sizeof(newKey) + sizeof(newVector));
-      for (int i = 0; i < sizeof(newKey); i++) 
+      for (int i = 0; i < sizeof(newKey); i++)
       {
         EEPROM.write(i, newKey[i]);
       }
-      for (int i = 0; i < sizeof(newVector); i++) 
+      for (int i = 0; i < sizeof(newVector); i++)
       {
         EEPROM.write(sizeof(newKey) + i, newVector[i]);
       }
@@ -207,18 +207,18 @@ void loop() {
       buttonStateChanged = false; // Reset the state change flag
 
     }
-    else 
+    else
     {
       // Button is not pressed, read key and vector from EEPROM
       byte savedKey[sizeof(aesKey)];
       byte savedVector[16];
 
       EEPROM.begin(sizeof(aesKey) + sizeof(aesIv));
-      for (int i = 0; i < sizeof(aesKey); i++) 
+      for (int i = 0; i < sizeof(aesKey); i++)
       {
         savedKey[i] = EEPROM.read(i);
       }
-      for (int i = 0; i < sizeof(savedVector); i++) 
+      for (int i = 0; i < sizeof(savedVector); i++)
       {
         savedVector[i] = EEPROM.read(sizeof(aesKey) + i);
       }
@@ -230,8 +230,8 @@ void loop() {
     }
 
     // Generate a random message
-    byte randomMessage[16];  
-    for (int i = 0; i < sizeof(randomMessage); i++) 
+    byte randomMessage[16];
+    for (int i = 0; i < sizeof(randomMessage); i++)
     {
       randomMessage[i] = random(256);  // Generate a random byte (0-255)
     }
@@ -243,7 +243,7 @@ void loop() {
 
     // Wait to receive a message through pCharacteristic_5
     std::string enReceived = pCharacteristic_5->getValue();
-    if (!enReceived.empty()) 
+    if (!enReceived.empty())
     {
       // Encrypt the generated random message for comparison
       byte encryptedRandomMessage[16];
@@ -261,7 +261,7 @@ void loop() {
     pCharacteristic_1->notify();
     // Control the hardware lock based on the received message
     std::string controlMessage = pCharacteristic_6->getValue();
-    if (!controlMessage.empty() && isAuthorized) 
+    if (!controlMessage.empty() && isAuthorized)
     {
       if (controlMessage == "ON") {
         digitalWrite(LOCK_PIN,HIGH);
@@ -290,5 +290,5 @@ void loop() {
 [112564][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
 [112567][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
 [112583][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error
-[112586][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error 
+[112586][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error
 */
