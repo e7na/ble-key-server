@@ -86,7 +86,7 @@ void setup()
   Serial.begin(BAUD);
   Serial.setTimeout(60000);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP); // Set the button pin as INPUT with internal pull-up resistor
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN); // Set the button pin as INPUT with internal pull-down resistor = low when not pressed
   pinMode(LOCK_PIN  , OUTPUT);
 
   // Attach the interrupt handler to the button pin
