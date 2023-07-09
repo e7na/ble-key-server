@@ -75,6 +75,7 @@ bool buttonStateChanged = false;
 
 void IRAM_ATTR handleButtonPress()
 {
+  delay(1000);
   if (!BUTTON_PRESSED)
   {
     buttonStateChanged = true;
@@ -167,10 +168,21 @@ void setup()
 }
 
 void loop() {
+  // Get the current free heap memory
+  size_t freeHeap = ESP.getFreeHeap();
+  // Print the free heap memory to the serial monitor
+  Serial.print("Free Heap Memory: ");
+  Serial.print(freeHeap);
+  Serial.println(" bytes");
+
+  // Add a delay or perform other operations here
+  delay(1000);
+
   if (deviceConnected)
   {
     if (buttonStateChanged)
     {
+      Serial.println("buttonStateChanged loop");
       // Button is pressed, receive new AES key and vector
       byte newKey[sizeof(aesKey)];
       byte newVector[16];
@@ -272,3 +284,11 @@ void loop() {
     oldDeviceConnected = deviceConnected;
   }
 }
+/*
+[112545][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
+[112548][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
+[112564][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
+[112567][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
+[112583][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error
+[112586][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error 
+*/
