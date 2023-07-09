@@ -1,4 +1,7 @@
 #include <Arduino.h>
+
+#include <Effortless_SPIFFS.h>
+
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -8,35 +11,32 @@
 #include <BLECharacteristic.h>
 #include <BLERemoteCharacteristic.h>
 #include <AESLib.h>
-#include <EEPROM.h>
+
+eSPIFFS fileSystem;
 
 #define BAUD 115200
-
-#define BUTTON_PIN  4  //When pressed should let us save new key and vector in memory
-#define LOCK_PIN    2
-
-#define BUTTON_PRESSED (digitalRead(BUTTON_PIN) == HIGH)
 
 bool isAuthorized = false;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
-BLEServer *pServer = NULL;
-BLECharacteristic *pCharacteristic_1 = NULL;
-BLECharacteristic *pCharacteristic_2 = NULL;
-BLECharacteristic *pCharacteristic_3 = NULL;
-BLECharacteristic *pCharacteristic_4 = NULL;
-BLECharacteristic *pCharacteristic_5 = NULL;
-BLECharacteristic *pCharacteristic_6 = NULL;
-BLE2902 *pBLE2902_1;
-BLE2902 *pBLE2902_2;
-BLE2902 *pBLE2902_3;
-BLE2902 *pBLE2902_4;
-BLE2902 *pBLE2902_5;
-BLE2902 *pBLE2902_6;
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic_1 = NULL;
+BLECharacteristic* pCharacteristic_2 = NULL;
+BLECharacteristic* pCharacteristic_3 = NULL;
+BLECharacteristic* pCharacteristic_4 = NULL;
+BLECharacteristic* pCharacteristic_5 = NULL;
+BLECharacteristic* pCharacteristic_6 = NULL;
+BLE2902* pBLE2902_1;
+BLE2902* pBLE2902_2;
+BLE2902* pBLE2902_3;
+BLE2902* pBLE2902_4;
+BLE2902* pBLE2902_5;
+BLE2902* pBLE2902_6;
+
 // generating UUIDs: https://www.uuidgenerator.net/
-#define SERVICE_UUID          "d9327ccb-992b-4d78-98ce-2297ed2c09d6"
+#define SERVICE_UUID "d9327ccb-992b-4d78-98ce-2297ed2c09d6"
 #define CHARACTERISTIC_UUID_1 "e95e7f63-f041-469f-90db-04d2e3e7619b"
 #define CHARACTERISTIC_UUID_2 "8c233b56-4988-4c3c-95b5-ec5b3c179c91"
 #define CHARACTERISTIC_UUID_3 "56bba80a-91f1-46ab-b892-7325e19c3429"
@@ -44,251 +44,235 @@ BLE2902 *pBLE2902_6;
 #define CHARACTERISTIC_UUID_5 "acc9a30f-9e44-4323-8193-7bac8c9bc484"
 #define CHARACTERISTIC_UUID_6 "9800d290-19fb-4085-9610-f1e878725ad2"
 
-class MyServerCallbacks : public BLEServerCallbacks
-{
-  void onConnect(BLEServer *pServer)
-  {
+std::string remoteAddressStr;
+
+
+uint8_t keyFlag = false;
+uint8_t vectorFlag = false;
+void updateAuthStatus(bool newAuthStatus) {
+  isAuthorized = newAuthStatus;
+
+  if (!isAuthorized) {
+    keyFlag = false;
+    vectorFlag = false;
+  }
+
+  std::string authStatus = isAuthorized ? "authorized" : "unauthorized";
+  pCharacteristic_1->setValue(authStatus);
+  pCharacteristic_1->notify();
+}
+
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
     deviceConnected = true;
-    isAuthorized = false;
+
     Serial.println("Connected to client");
+
+    updateAuthStatus(false);
   };
-  void onDisconnect(BLEServer *pServer)
-  {
+
+  void onDisconnect(BLEServer* pServer) {
     deviceConnected = false;
     Serial.println("Disconnected from client");
+
+    updateAuthStatus(false);
   }
-  void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param)
-  {
+
+  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) {
     BLEAddress remoteAddress(param->connect.remote_bda);
-    std::string remoteAddressStr = remoteAddress.toString();
+    remoteAddressStr = remoteAddress.toString();
     Serial.print("Connected to device with address: ");
     Serial.println(remoteAddressStr.c_str());
   }
 };
 
+#define STR_TERMINATOR 1
+#define AES_KEY_LENGTH 32
+#define AES_VECTOR_LENGTH 16
+static uint8_t aesKey[AES_KEY_LENGTH] = {0};
+static uint8_t aesIv[AES_VECTOR_LENGTH] = {0};
+
 AESLib aes;
 
-static byte aesKey[16] = { 0 };
-static byte aesIv[16]  = { 0 };
-
-bool buttonStateChanged = false;
-
-void IRAM_ATTR handleButtonPress()
-{
-  delay(1000);
-  if (!BUTTON_PRESSED)
-  {
-    buttonStateChanged = true;
-  }
-}
-
-void setup()
-{
+void setup() {
   Serial.begin(BAUD);
   Serial.setTimeout(60000);
-
-  pinMode(BUTTON_PIN, INPUT_PULLDOWN); // Set the button pin as INPUT with internal pull-down resistor = low when not pressed
-  pinMode(LOCK_PIN  , OUTPUT);
-
-  // Attach the interrupt handler to the button pin
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonPress, RISING);
 
   // Create the BLE Device
   BLEDevice::init("ESP32");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-  BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID), 20, 0);
+  BLEService* pService = pServer->createService(BLEUUID(SERVICE_UUID), 20, 0);
 
-
+  // clang-format off
   // Create a BLE Characteristic
-  pCharacteristic_1 = pService->createCharacteristic(     /*AUTH STATUS*/
+  pCharacteristic_1 = pService->createCharacteristic( /*AUTH STATUS*/
     CHARACTERISTIC_UUID_1,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_READ    |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_1 = new BLE2902();
   pBLE2902_1->setNotifications(true);
   pCharacteristic_1->addDescriptor(pBLE2902_1);
 
-  pCharacteristic_2 = pService->createCharacteristic(         /*KEY*/
+  pCharacteristic_2 = pService->createCharacteristic( /*KEY*/
     CHARACTERISTIC_UUID_2,
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_WRITE   |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_2 = new BLE2902();
   pBLE2902_2->setNotifications(true);
   pCharacteristic_2->addDescriptor(pBLE2902_2);
 
-  pCharacteristic_3 = pService->createCharacteristic(           /*VECTOR*/
+  pCharacteristic_3 = pService->createCharacteristic( /*VECTOR*/
     CHARACTERISTIC_UUID_3,
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_WRITE   |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_3 = new BLE2902();
   pBLE2902_3->setNotifications(true);
   pCharacteristic_3->addDescriptor(pBLE2902_3);
 
-  pCharacteristic_4 = pService->createCharacteristic(         /*trans random value*/
+  pCharacteristic_4 = pService->createCharacteristic( /*trans random value*/
     CHARACTERISTIC_UUID_4,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_READ    |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_4 = new BLE2902();
   pBLE2902_4->setNotifications(true);
   pCharacteristic_4->addDescriptor(pBLE2902_4);
 
-  pCharacteristic_5 = pService->createCharacteristic(          /*recive the encrypted random value*/
+  pCharacteristic_5 = pService->createCharacteristic( /*recive the encrypted random value*/
     CHARACTERISTIC_UUID_5,
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_WRITE   |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_5 = new BLE2902();
   pBLE2902_5->setNotifications(true);
   pCharacteristic_5->addDescriptor(pBLE2902_5);
 
-  pCharacteristic_6 = pService->createCharacteristic(           /*action control*/
+  pCharacteristic_6 = pService->createCharacteristic( /*action control*/
     CHARACTERISTIC_UUID_6,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY |
-    BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_READ    |
+      BLECharacteristic::PROPERTY_WRITE   |
+      BLECharacteristic::PROPERTY_NOTIFY  |
+      BLECharacteristic::PROPERTY_INDICATE
+  );
   pBLE2902_6 = new BLE2902();
   pBLE2902_6->setNotifications(true);
   pCharacteristic_6->addDescriptor(pBLE2902_6);
+  // clang-format on
 
   // Start advertising
   pService->start();
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(false);
-  pAdvertising->setMinPreferred(0x0); // set value to 0x00 to not advertise this parameter
+  pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
   BLEDevice::startAdvertising();
   Serial.println("Waiting a client connection to notify...");
   delay(2000);
 }
 
 void loop() {
-  // Get the current free heap memory
-  size_t freeHeap = ESP.getFreeHeap();
-  // Print the free heap memory to the serial monitor
-  Serial.print("Free Heap Memory: ");
-  Serial.print(freeHeap);
-  Serial.println(" bytes");
+  if (deviceConnected) {
+    char serialBuffer[UINT8_MAX];
+    uint8_t randomMessage[16];
 
-  // Add a delay or perform other operations here
-  delay(1000);
+    static uint8_t newKey[sizeof(aesKey)] = {0};
+    static uint8_t newVector[sizeof(aesIv)] = {0};
 
-  if (deviceConnected)
-  {
-    if (buttonStateChanged)
-    {
-      Serial.println("buttonStateChanged loop");
-      // Button is pressed, receive new AES key and vector
-      byte newKey[sizeof(aesKey)];
-      byte newVector[16];
-      // Receive new AES key via pCharacteristic_2
-      std::string receivedKey    = pCharacteristic_2->getValue();
-      if (!receivedKey.empty())    memcpy(newKey, receivedKey.c_str(), sizeof(aesKey));
+    if (!keyFlag || !vectorFlag) {
+      std::string receivedKey = pCharacteristic_2->getValue();
+      if (!keyFlag && !receivedKey.empty()) {
+        memcpy(newKey, receivedKey.c_str(), sizeof(newKey));
+        keyFlag = true;
+      }
+
       // Receive new vector via pCharacteristic_3
       std::string receivedVector = pCharacteristic_3->getValue();
-      if (!receivedVector.empty()) memcpy(newVector, receivedVector.c_str(), 16);
-      // Save new key and vector to EEPROM
-      EEPROM.begin(sizeof(newKey) + sizeof(newVector));
-      for (int i = 0; i < sizeof(newKey); i++)
-      {
-        EEPROM.write(i, newKey[i]);
+      if (!vectorFlag && !receivedVector.empty()) {
+        memcpy(newVector, receivedVector.c_str(), sizeof(newVector));
+        vectorFlag = true;
       }
-      for (int i = 0; i < sizeof(newVector); i++)
-      {
-        EEPROM.write(sizeof(newKey) + i, newVector[i]);
+
+      if (keyFlag & vectorFlag) {
+        // write the key and vector in one string `writeBuffer`
+        static char writeBuffer[sizeof(aesKey) + sizeof(aesIv) + STR_TERMINATOR];
+        static const char* readBuffer;
+        snprintf(writeBuffer, sizeof(writeBuffer), "%s%s", newVector, newKey);
+
+        // fetch the mac address to save the key and vector under
+#define FILENAME_LENGTH 33
+        char filename[FILENAME_LENGTH];
+        snprintf(filename, sizeof(filename), "/%s", remoteAddressStr.c_str());
+
+        // attempt to save the key and vector then read the result
+        if (fileSystem.saveToFile(filename, writeBuffer)) {
+          if (fileSystem.openFromFile(filename, readBuffer)) {
+            // updateAuthStatus(true);  //! mock successful auth
+            //! and print the key and vector
+            // clang-format off
+            snprintf(
+              serialBuffer,
+              sizeof(serialBuffer),
+              "Successfully read and parsed %d bytes from: ",
+              strlen(readBuffer)
+            );  // clang-format on
+            Serial.print(serialBuffer);
+            Serial.println(filename);
+            Serial.println(readBuffer);
+
+            // Generate a random message
+            for (uint8_t i = 0; i < sizeof(randomMessage); i++) {
+              randomMessage[i] = random(256);  // Generate a random uint8_t (0-255)
+            }
+            // Send the random message through pCharacteristic_4
+            std::string randomStr(reinterpret_cast<const char*>(randomMessage), sizeof(randomMessage));
+            pCharacteristic_4->setValue(randomStr);
+            pCharacteristic_4->notify();
+            Serial.print("Sent random message: ");
+            Serial.println(randomStr.c_str());
+          }
+        } else {
+          Serial.println("Failed to write data to file");
+        }
       }
-      EEPROM.commit();
-      EEPROM.end();
-      buttonStateChanged = false; // Reset the state change flag
+    } else if (!isAuthorized) {
+      std::string enReceived = pCharacteristic_5->getValue();
+      if (!enReceived.empty()) {
+        // Encrypt the generated random message for comparison
+        uint8_t encryptedRandomMessage[16];
+        uint16_t enc_bytes = aes.encrypt(randomMessage, sizeof(randomMessage), encryptedRandomMessage, newKey, sizeof(aesKey), newVector);
 
-    }
-    else
-    {
-      // Button is not pressed, read key and vector from EEPROM
-      byte savedKey[sizeof(aesKey)];
-      byte savedVector[16];
+        // Convert the encrypted random message to a string for comparison
+        std::string encryptedStr(reinterpret_cast<const char*>(encryptedRandomMessage), enc_bytes);
 
-      EEPROM.begin(sizeof(aesKey) + sizeof(aesIv));
-      for (int i = 0; i < sizeof(aesKey); i++)
-      {
-        savedKey[i] = EEPROM.read(i);
-      }
-      for (int i = 0; i < sizeof(savedVector); i++)
-      {
-        savedVector[i] = EEPROM.read(sizeof(aesKey) + i);
-      }
-      EEPROM.end();
-
-      // Use the saved key and vector for encryption/decryption
-      memcpy(aesKey, savedKey,   sizeof(aesKey));
-      memcpy(aesIv,  savedVector,sizeof(aesIv));
-    }
-
-    // Generate a random message
-    byte randomMessage[16];
-    for (int i = 0; i < sizeof(randomMessage); i++)
-    {
-      randomMessage[i] = random(256);  // Generate a random byte (0-255)
-    }
-
-    // Send the random message through pCharacteristic_4
-    std::string randomStr(reinterpret_cast<const char*>(randomMessage), sizeof(randomMessage));
-    pCharacteristic_4->setValue(randomStr);
-    pCharacteristic_4->notify();
-
-    // Wait to receive a message through pCharacteristic_5
-    std::string enReceived = pCharacteristic_5->getValue();
-    if (!enReceived.empty())
-    {
-      // Encrypt the generated random message for comparison
-      byte encryptedRandomMessage[16];
-      uint16_t enc_bytes = aes.encrypt(randomMessage, sizeof(randomMessage), encryptedRandomMessage, aesKey, sizeof(aesKey), aesIv);
-
-      // Convert the encrypted random message to a string for comparison
-      std::string encryptedStr(reinterpret_cast<const char*>(encryptedRandomMessage), enc_bytes);
-
-      // Compare the received message with the encrypted random message
-      bool isAuthorized = (enReceived == encryptedStr);
-    }
-    // Update pCharacteristic_1 with the authorization status
-    std::string authStatus = isAuthorized ? "Authorized" : "Unauthorized";
-    pCharacteristic_1->setValue(authStatus);
-    pCharacteristic_1->notify();
-    // Control the hardware lock based on the received message
-    std::string controlMessage = pCharacteristic_6->getValue();
-    if (!controlMessage.empty() && isAuthorized)
-    {
-      if (controlMessage == "ON") {
-        digitalWrite(LOCK_PIN,HIGH);
-      } else if (controlMessage == "OFF") {
-        digitalWrite(LOCK_PIN,LOW);
+        // Compare the received message with the encrypted random message
+        updateAuthStatus(enReceived == encryptedStr);
+        Serial.print("Received encrypted message: ");
+        Serial.println(enReceived.c_str());
+        Serial.print("Our encrypted message: ");
+        Serial.println(encryptedStr.c_str());
+        Serial.println(isAuthorized ? "Authorized" : "Not Authorized");
       }
     }
   }
-  if (!deviceConnected && oldDeviceConnected)
-  {
-    isAuthorized = false ;
-    delay(500);                  // give the bluetooth stack the chance to get things ready
-    pServer->startAdvertising(); // restart advertising
-    //Serial.println("start advertising");
+
+  if (!deviceConnected && oldDeviceConnected) {
+    isAuthorized = false;
+    delay(500);                   // give the bluetooth stack the chance to get things ready
+    pServer->startAdvertising();  // restart advertising
     oldDeviceConnected = deviceConnected;
   }
+
   // connecting
-  if (deviceConnected && !oldDeviceConnected)
-  {
+  if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
   }
 }
-/*
-[112545][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
-[112548][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
-[112564][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
-[112567][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=-1 Unknown ESP_ERR error
-[112583][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error
-[112586][E][BLECharacteristic.cpp:537] notify(): << esp_ble_gatts_send_ notify: rc=259 Unknown ESP_ERR error
-*/
