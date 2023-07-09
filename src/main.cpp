@@ -12,7 +12,7 @@
 
 #define BAUD 115200
 
-#define BUTTON_PIN  4
+#define BUTTON_PIN  4  //When pressed should let us save new key and vector in memory
 #define LOCK_PIN    2
 
 #define BUTTON_PRESSED (digitalRead(BUTTON_PIN) == HIGH)
@@ -71,19 +71,33 @@ AESLib aes;
 static byte aesKey[16] = { 0 };
 static byte aesIv[16]  = { 0 };
 
+bool buttonStateChanged = false; 
+
+void IRAM_ATTR handleButtonPress()
+{
+  if (!BUTTON_PRESSED)
+  {
+    buttonStateChanged = true;
+  }
+}
+
 void setup() 
 {
   Serial.begin(BAUD);
   Serial.setTimeout(60000);
 
-  pinMode(BUTTON_PIN, INPUT);      /*when pressed should let us save new key and vector in memory*/
-  pinMode(LOCK_PIN  , OUTPUT); 
+  pinMode(BUTTON_PIN, INPUT_PULLUP); // Set the button pin as INPUT with internal pull-up resistor
+  pinMode(LOCK_PIN  , OUTPUT);
+
+  // Attach the interrupt handler to the button pin
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonPress, RISING);
 
   // Create the BLE Device
   BLEDevice::init("ESP32");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
+
 
   // Create a BLE Characteristic
   pCharacteristic_1 = pService->createCharacteristic(     /*AUTH STATUS*/
@@ -155,7 +169,7 @@ void setup()
 void loop() {
   if (deviceConnected)
   {
-    if (BUTTON_PRESSED)
+    if (buttonStateChanged)
     {
       // Button is pressed, receive new AES key and vector
       byte newKey[sizeof(aesKey)];
@@ -178,6 +192,8 @@ void loop() {
       }
       EEPROM.commit();
       EEPROM.end();
+      buttonStateChanged = false; // Reset the state change flag
+
     }
     else 
     {
